@@ -290,8 +290,7 @@ namespace ShellSquare.ETP.Simulator
                 await m_ConsumerHandler.Connect(url, userName, password, m_Token);
 
 
-
-                m_ProducerHandler = new ProducerHandler();
+                m_ProducerHandler = new ProducerHandler ();
                 m_ProducerHandler.Message = Message;
                 await m_ProducerHandler.Connect(url, userName, password, m_Token);
 

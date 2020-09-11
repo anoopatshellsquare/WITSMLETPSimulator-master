@@ -131,6 +131,7 @@
     <Compile Include="EtpHelper.cs" />
     <Compile Include="NotifyObservableCollection.cs" />
     <Compile Include="ProducerHandler.cs" />
+    <Compile Include="TaskTimer.cs" />
     <Compile Include="TimeSimulationHandler.cs" />
     <Compile Include="UserDetails.cs" />
     <Compile Include="Utilities.cs" />
