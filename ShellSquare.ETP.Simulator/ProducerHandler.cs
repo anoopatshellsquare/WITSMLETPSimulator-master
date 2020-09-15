@@ -10,6 +10,7 @@ using Energistics.Etp.v11.Protocol.ChannelStreaming;
 using Energistics.Etp.v11.Protocol.Core;
 using Energistics.Etp.v11.Protocol.Discovery;
 using Energistics.Etp.v11.Protocol.Store;
+using Energistics.Etp.v12.Protocol.Store;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -17,13 +18,16 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Media.Animation;
+using IStoreStore = Energistics.Etp.v12.Protocol.Store.IStoreStore;
 
 namespace ShellSquare.ETP.Simulator
 {
     public class ProducerHandler
     {
+        private List<ChannelStreamingInfo> m_ChannelStreamingInfo = new List<ChannelStreamingInfo>();
         public Action<ChannelMetadata> ChannelInfoReceived;
         public Action<string, double, TraceLevel> Message;
+        public Action<IList<DataItem>> ChannelDataReceived;
         const string SUBPROTOCOL = "energistics-tp";
         IEtpClient m_client;
         private DateTime m_Time;
@@ -32,14 +36,15 @@ namespace ShellSquare.ETP.Simulator
 
         private readonly DateTime m_Epoch = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
-        public string UserNameS = "";
+        public string UserName = "";
         public string Password = "";
         public string URL = "";
 
 
         TimeSpan  startTimeSpan = TimeSpan.Zero;
         TimeSpan periodTimeSpan = TimeSpan.FromSeconds(10);
-
+        long index = 0;
+        public ChannelMetadata Metadata;
         public async Task Connect(string url, string username, string password, CancellationToken token)
         {
             try
@@ -62,19 +67,23 @@ namespace ShellSquare.ETP.Simulator
                 m_client.Register<IChannelStreamingProducer, ChannelStreamingProducerHandler>();
 
                 m_client.Register<IDiscoveryCustomer, DiscoveryCustomerHandler>();
-                m_client.Register<IStoreCustomer, StoreCustomerHandler>();
+               
+              
+
                 m_client.Handler<ICoreClient>().OnOpenSession += HandleOpenSession;
 
+              //  m_client.Handler<IStoreStore>().OnPutDataObjects += ProducerHandler_OnPutDataObjects;
 
                 m_client.Register<IChannelStreamingConsumer, ChannelStreamingConsumerHandler >();
                 m_client.Register<IChannelStreamingConsumer, ChannelStreamingConsumerHandler>();
-                m_client.Handler<IChannelStreamingConsumer>().OnChannelMetadata += ProducerHandler_OnChannelMetadata;
-                m_client.Handler<IChannelStreamingConsumer>().OnProtocolException += ProducerHandler_OnProtocolException; ;
-                m_client.Handler<IChannelStreamingConsumer>().OnChannelData += ProducerHandler_OnChannelData;
 
-                
 
-              CreateSession(protocols);
+                m_client.Register<IChannelStreamingConsumer, ChannelStreamingConsumerHandler>();
+                m_client.Handler<IChannelStreamingConsumer>().OnChannelMetadata += HandleChannelMetadata;
+                m_client.Handler<IChannelStreamingConsumer>().OnProtocolException += HandleProtocolException;
+                m_client.Handler<IChannelStreamingConsumer>().OnChannelData += HandleChannelData;
+
+                CreateSession(protocols);
                 await m_client.OpenAsync();
 
             }
@@ -89,63 +98,79 @@ namespace ShellSquare.ETP.Simulator
             }
         }
 
-        private void ProducerHandler_OnChannelData(object sender, ProtocolEventArgs<ChannelData> e)
+
+
+
+        protected void HandleChannelData(object sender, ProtocolEventArgs<ChannelData> e)
         {
-            string a = "";
-            throw new NotImplementedException();
+            ChannelDataReceived?.Invoke(e.Message.Data);
+        }
+        protected void HandleProtocolException(object sender, ProtocolEventArgs<IProtocolException> e)
+        {
+            var receivedTime = DateTime.UtcNow;
+            if (e.Header.MessageType == 1000)
+            {
+                var timediff = receivedTime - m_Time;
+                var bodyrecord = Activator.CreateInstance<ProtocolException>();
+                string message = $"Error Received ({e.Message.ErrorCode}): {e.Message.ErrorMessage}";
+
+                message = $"\nResponse : [Protocol {e.Header.Protocol} MessageType {e.Header.MessageType}]\n{message}";
+
+                Message?.Invoke(message, timediff.TotalMilliseconds, TraceLevel.Error);
+               // HasDescribing = false;
+            }
         }
 
-        private void ProducerHandler_OnProtocolException(object sender, ProtocolEventArgs<IProtocolException> e)
+
+        protected void HandleChannelMetadata(object sender, ProtocolEventArgs<ChannelMetadata> e)
         {
+            var receivedTime = DateTime.UtcNow;
+            if (e.Header.Protocol == 1 && e.Header.MessageType == 2)
+            {
+                var timediff = receivedTime - m_Time;
 
+                string message = "Channels received: [";
+                ChannelMetadata metadata = new ChannelMetadata();
+                metadata.Channels = new List<ChannelMetadataRecord>();
+                lock (m_ChannelStreamingInfo)
+                {
+                    foreach (var channel in e.Message.Channels)
+                    {
 
-            string a = "";
-           // throw new NotImplementedException();
-        }
+                        //if (m_LogCurveEml.Contains(channel.ChannelUri, StringComparer.InvariantCultureIgnoreCase))
+                        {
+                            metadata.Channels.Add(channel);
+                            ChannelStreamingInfo channelStreamingInfo = new ChannelStreamingInfo()
+                            {
+                                ChannelId = channel.ChannelId,
+                                StartIndex = new StreamingStartIndex()
+                                {
+                                    Item = null
+                                },
+                                ReceiveChangeNotification = true
+                            };
 
-        private void ProducerHandler_OnChannelStreamingStop(object sender, ProtocolEventArgs<ChannelStreamingStop> e)
-        {
+                            m_ChannelStreamingInfo.Add(channelStreamingInfo);
+                            message = message + $"\n{channel.ChannelId} {channel.ChannelName} {channel.ChannelUri}";
 
-            
-            //throw new NotImplementedException();
-        }
+                            //ChannelMetaDataVM channelMetaData_VM = ETPMapper.Instance().Map<ChannelMetaDataVM>(channel); 
+                            //string json = JsonConvert.SerializeObject(channelMetaData_VM, Formatting.Indented);
+                            //Message?.Invoke(json, timediff.TotalMilliseconds, TraceLevel.Info);
+                        }
+                    }
 
-        private void ProducerHandler_OnAcknowledge1(object sender, ProtocolEventArgs<IAcknowledge> e)
-        {
-            throw new NotImplementedException();
-        }
+                    Metadata = metadata;
 
-        private void ProducerHandler_OnChannelMetadata(object sender, ProtocolEventArgs<ChannelMetadata> e)
-        {
-          
-            //throw new NotImplementedException();
-        }
+                    ChannelInfoReceived?.Invoke(metadata);
+                }
 
-        private void ProducerHandler_OnChannelDescribe(object sender, ProtocolEventArgs<ChannelDescribe, IList<ChannelMetadataRecord>> e)
-        {
-           
-            //throw new NotImplementedException();
-        }
+                message = message + "\n]";
 
-        private void ProducerHandler_OnStart(object sender, ProtocolEventArgs<Start> e)
-        {
-            String a = "";
-            string message = $"\nRequest: [Protocol {e.Header .Protocol } MessageType {e.Header.MessageType}]";
-            message= e.Message.ToString();
-            Message?.Invoke(message, 123456, TraceLevel.Info);
-        }
+                message = $"\nResponse : [Protocol {e.Header.Protocol} MessageType {e.Header.MessageType}]\n{message}";
+                Message?.Invoke(message, timediff.TotalMilliseconds, TraceLevel.Info);
 
-        private void ProducerHandler_OnAcknowledge(object sender, ProtocolEventArgs<IAcknowledge> e)
-        {
-            string a = "";
-           // throw new NotImplementedException();
-        }
-
-        private void ProducerHandler_OnChannelStreamingStart(object sender, ProtocolEventArgs<ChannelStreamingStart> e)
-        {
-            string a = "";
-            Message?.Invoke("response from Simulate just Test", 0, TraceLevel.Info);
-            //  throw new NotImplementedException();
+               // HasDescribing = false;
+            }
         }
 
 
@@ -177,17 +202,11 @@ namespace ShellSquare.ETP.Simulator
 
         protected void HandleOpenSession(object sender, ProtocolEventArgs<OpenSession> e)
         {
-
-            String a = "";
-            //var receivedTime = DateTime.UtcNow;
-            //lock (m_ConnectionLock)
-            //{
-            //    m_HasConnected = true;
-            //}
-            //string message = ToString(e.Message);
-            //message = $"\nResponse : [Protocol {e.Header.Protocol} MessageType {e.Header.MessageType}]\n{message}";
-            //var timediff = receivedTime - m_Time;
-            //Message?.Invoke(message, timediff.TotalMilliseconds, TraceLevel.Info);
+            var receivedTime = DateTime.UtcNow;
+            string message = e.Message.ToMessage();
+            message = $"\nResponse : [Protocol {e.Header.Protocol} MessageType {e.Header.MessageType}]\n{message}";
+            var timediff = receivedTime - m_Time;
+            Message?.Invoke(message, timediff.TotalMilliseconds, TraceLevel.Info);
         }
 
 
@@ -199,42 +218,75 @@ namespace ShellSquare.ETP.Simulator
             header.MessageId = EtpHelper.NextMessageId;
             header.MessageFlags = 0;
             header.CorrelationId = 0;
-
             var result = m_client.Handler<IChannelStreamingProducer>().ChannelMetadata(header, metadata.Channels);
         }
 
-        long index = 0;
-        private async Task SendChannelDataActual(List<ChannelStreamingInfo> lstChannels,IEtpClient m_client)
+
+
+        //public async Task SendChannelMetadata(ChannelMetadata metadata)
+        //{
+        //    MessageHeader header = new MessageHeader();
+        //    header.Protocol = (int)Protocols.ChannelStreaming;
+        //    header.MessageType = 2;
+        //    header.MessageId = EtpHelper.NextMessageId;
+        //    header.MessageFlags = 0;
+        //    header.CorrelationId = 0;
+
+        //    var result = m_client.Handler<IChannelStreamingProducer>().ChannelMetadata(header, metadata.Channels);
+        //}
+
+       
+        private async Task SendChannelDataActual(List<ChannelStreamingInfo> lstChannels)
         {
             var handler = m_client.Handler<IChannelStreamingProducer>();
-           // index = index + 1;
+            //index = index + 1;
             await Task.Run(async () =>
             {
                 var receivedTime = DateTime.UtcNow;
                 var timediff = receivedTime - m_Time;
                 MessageHeader header = new MessageHeader();
-                header.Protocol = (int)Protocols.ChannelStreaming;
+                header.Protocol = (int)Protocols.ChannelStreaming  ;
                 header.MessageType = 3;
                 header.MessageId = EtpHelper.NextMessageId;
                 header.MessageFlags = 0;
                 header.CorrelationId = 0;
+                
                 var recordData = Activator.CreateInstance<ChannelData>();
+                
                 recordData.Data = new List<DataItem>();
                 Random random = new Random();
                 foreach (var item in lstChannels)
                 {
-                    TimeSpan t = (receivedTime - m_Epoch);
-                    index = (long)t.TotalMilliseconds;
+
                     DataItem d = new DataItem();
+                    //d.ChannelId = item.ChannelId;
+                    TimeSpan t = (receivedTime - m_Epoch);
+                    //DataItem d = new DataItem();
                     d.ChannelId = item.ChannelId;
+                    index = (long)t.TotalMilliseconds;
+
                     d.Indexes = new List<long>();
                     d.Indexes.Add(index);
                     d.Value = new DataValue();
-                    d.Value.Item = Math.Round(random.NextDouble() * 1000, 2);//random.Next();
+                    d.Value.Item = random.Next();
                     d.ValueAttributes = new List<DataAttribute>();
                     recordData.Data.Add(d);
+
+
+                    // TimeSpan t = (receivedTime - m_Epoch);
+                    //// index = (long)t.TotalMilliseconds;
+                    // DataItem d = new DataItem();
+                    // d.ChannelId = item.ChannelId;
+                    // d.Indexes = new List<long>();
+                    // d.Indexes.Add(index);
+                    // d.Value = new DataValue();
+                    // d.Value.Item = random.Next();//(long)t.TotalMilliseconds;  //Math.Round(random.NextDouble() * 1000, 2);//random.Next();
+                    // d.ValueAttributes = new List<DataAttribute>();
+                    // recordData.Data.Add(d);
+                    // //m_client.Handler<IChannelStreamingProducer>().ChannelData(header, recordData.Data,MessageFlags.None);
                 }
-                var a = m_client.Handler<IChannelStreamingProducer>().ChannelData(header, recordData.Data);
+                var a = handler.ChannelData(header, recordData.Data);
+                //var  a= m_client.Handler<IChannelStreamingProducer>().ChannelData(header, recordData.Data);
                 string message = $"\nRequest: [Protocol {header.Protocol} MessageType {header.MessageType}]";
                 Message?.Invoke(message + "\nChannel Data processed " + (receivedTime - m_Epoch).ToString(), 0, TraceLevel.Info);
             });
@@ -243,61 +295,95 @@ namespace ShellSquare.ETP.Simulator
       
         public async Task SendChannelData(List<ChannelStreamingInfo> lstChannels)
         {
-            //IDictionary<string, string> auth;
-            //auth = Authorization.Basic(UserNameS, Password);
-            //m_client = EtpFactory.CreateClient(WebSocketType.WebSocket4Net, URL, m_ApplicationName, m_ApplicationVersion, SUBPROTOCOL, auth);
-            //m_client.Register<IChannelStreamingProducer, ChannelStreamingProducerHandler>();
-
-            var auth = Authorization.Basic(UserNameS, Password);
-            m_client = EtpFactory.CreateClient(WebSocketType.WebSocket4Net, URL, m_ApplicationName, m_ApplicationVersion, SUBPROTOCOL, auth);
-            m_client.Register<IChannelStreamingProducer, ChannelStreamingProducerHandler>();
-
             while (true)
             {
 
-                await SendChannelDataActual(lstChannels, m_client);
+                var handler = m_client.Handler<IChannelStreamingProducer>();
+                //index = index + 1;
+                await Task.Run(async () =>
+                {
+                    MessageHeader header = new MessageHeader();
+                    header.Protocol = (int)Protocols.ChannelStreaming;
+                    header.MessageType = 3;
+                    header.MessageId = EtpHelper.NextMessageId;
+                    header.MessageFlags = 0;
+                    header.CorrelationId = 0;
+
+                    var recordData = Activator.CreateInstance<ChannelData>();
+                    recordData.Data = new List<DataItem>();
+
+                    Random random = new Random();
+                    var receivedTime = DateTime.UtcNow;
+                    foreach (var item in lstChannels)
+                    {
+                        DataItem d = new DataItem();
+                        //d.ChannelId = item.ChannelId;
+                        TimeSpan t = (receivedTime - m_Epoch);
+                        //DataItem d = new DataItem();
+                        d.ChannelId = item.ChannelId;
+                        index = (long)t.TotalMilliseconds;
+
+                        d.Indexes = new List<long>();
+                        d.Indexes.Add(index);
+                        d.Value = new DataValue();
+                        d.Value.Item = random.Next();
+                        d.ValueAttributes = new List<DataAttribute>();
+                        recordData.Data.Add(d);
+                    }
+                    var a = handler.ChannelData(header, recordData.Data);
+                    //string message = $"\nRequest: [Protocol {header.Protocol} MessageType {header.MessageType}]";
+                    //Message?.Invoke(message + "\nChannel Data processed " + (receivedTime - m_Epoch).ToString(), 0, TraceLevel.Info);
+                });
                 await Task.Delay(TimeSpan.FromSeconds(10));
-
-                ////New Code ..Need to check is this required or not
-                //var handler = m_client.Handler<IChannelStreamingProducer>();
-                ////index = index + 1;
-                ////var timer = new System.Threading.Timer((e) =>
-                ////{
-                //    await Task.Run(async () =>
-                //    {
-                //        var receivedTime = DateTime.UtcNow;
-                //        var timediff = receivedTime - m_Time;
-
-                //        MessageHeader header = new MessageHeader();
-                //        header.Protocol = (int)Protocols.ChannelStreaming;
-                //        header.MessageType = 3;
-                //        header.MessageId = EtpHelper.NextMessageId;
-                //        header.MessageFlags = 0;
-                //        header.CorrelationId = 0;
-                //        var recordData = Activator.CreateInstance<ChannelData>();
-                //        recordData.Data = new List<DataItem>();
-                //        Random random = new Random();
-                //        foreach (var item in lstChannels)
-                //        {
-                //            TimeSpan t = (receivedTime - m_Epoch);
-                //            index = (long)t.TotalMilliseconds;
-                //            DataItem d = new DataItem();
-                //            d.ChannelId = item.ChannelId;
-                //            d.Indexes = new List<long>();
-                //            d.Indexes.Add(index);
-                //            d.Value = new DataValue();
-                //            d.Value.Item = Math.Round(random.NextDouble() * 1000, 2);//random.Next();
-                //            d.ValueAttributes = new List<DataAttribute>();
-                //            recordData.Data.Add(d);
-                //        }
-                //        m_client.Handler<IChannelStreamingProducer>().ChannelData(header, recordData.Data);
-                //        string message = $"\nRequest: [Protocol {header.Protocol} MessageType {header.MessageType}]";
-                //        Message?.Invoke(message + "\nChannel Data processed " + (receivedTime - m_Epoch).ToString(), 0, TraceLevel.Info);
-                //    });
-                //    await Task.Delay(TimeSpan.FromSeconds(10));
-                ////}, null, startTimeSpan, periodTimeSpan);
-
             }
+
+
+            //while (true)
+            //{
+
+            //    await SendChannelDataActual(lstChannels);
+            //    await Task.Delay(TimeSpan.FromSeconds(10));
+
+            //    ////New Code ..Need to check is this required or not
+            //    //var handler = m_client.Handler<IChannelStreamingProducer>();
+            //    ////index = index + 1;
+            //    ////var timer = new System.Threading.Timer((e) =>
+            //    ////{
+            //    //    await Task.Run(async () =>
+            //    //    {
+            //    //        var receivedTime = DateTime.UtcNow;
+            //    //        var timediff = receivedTime - m_Time;
+
+            //    //        MessageHeader header = new MessageHeader();
+            //    //        header.Protocol = (int)Protocols.ChannelStreaming;
+            //    //        header.MessageType = 3;
+            //    //        header.MessageId = EtpHelper.NextMessageId;
+            //    //        header.MessageFlags = 0;
+            //    //        header.CorrelationId = 0;
+            //    //        var recordData = Activator.CreateInstance<ChannelData>();
+            //    //        recordData.Data = new List<DataItem>();
+            //    //        Random random = new Random();
+            //    //        foreach (var item in lstChannels)
+            //    //        {
+            //    //            TimeSpan t = (receivedTime - m_Epoch);
+            //    //            index = (long)t.TotalMilliseconds;
+            //    //            DataItem d = new DataItem();
+            //    //            d.ChannelId = item.ChannelId;
+            //    //            d.Indexes = new List<long>();
+            //    //            d.Indexes.Add(index);
+            //    //            d.Value = new DataValue();
+            //    //            d.Value.Item = Math.Round(random.NextDouble() * 1000, 2);//random.Next();
+            //    //            d.ValueAttributes = new List<DataAttribute>();
+            //    //            recordData.Data.Add(d);
+            //    //        }
+            //    //        m_client.Handler<IChannelStreamingProducer>().ChannelData(header, recordData.Data);
+            //    //        string message = $"\nRequest: [Protocol {header.Protocol} MessageType {header.MessageType}]";
+            //    //        Message?.Invoke(message + "\nChannel Data processed " + (receivedTime - m_Epoch).ToString(), 0, TraceLevel.Info);
+            //    //    });
+            //    //    await Task.Delay(TimeSpan.FromSeconds(10));
+            //    ////}, null, startTimeSpan, periodTimeSpan);
+
+            //}
         }
     }
 }

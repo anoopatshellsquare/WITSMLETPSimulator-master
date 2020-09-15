@@ -17,9 +17,6 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
-
-
-
 namespace ShellSquare.ETP.Simulator
 {
     internal class ConsumerHandler
@@ -32,6 +29,7 @@ namespace ShellSquare.ETP.Simulator
         string m_ApplicationName = "ShellSquare ETP Simulator";
         string m_ApplicationVersion = "1.4.1.1";
 
+        public ChannelMetadata Metadata;
         public async Task Connect(string url, string username, string password, CancellationToken token)
         {
             try
@@ -163,26 +161,68 @@ namespace ShellSquare.ETP.Simulator
         }
 
 
-        public void Describe(List<string> uris)
+        public async Task Start(int maxDataItems, int maxMessageRate)
         {
+
+            MessageHeader header = new MessageHeader();
+            header.Protocol = (int)Protocols.ChannelStreaming;
+            header.MessageType = 0;
+            header.MessageId = EtpHelper.NextMessageId;
+            header.MessageFlags = 0;
+            header.CorrelationId = 0;
+
+            var handler = m_client.Handler<IChannelStreamingConsumer>();
+            handler.Start(maxDataItems, maxMessageRate);
+            string message = $"\nRequest: [Protocol {Protocols.ChannelStreaming} MessageType {0}]";
+            Message?.Invoke(message, 0, TraceLevel.Info);
+
+        }
+
+        public async Task Describe(List<string> uris)
+        {
+            //lock (m_ChannelStreamingInfo)
+            //{
+            //    m_ChannelStreamingInfo.Clear();
+
+            //    m_LogCurveEml.Clear();
+            //    m_LogCurveEml.AddRange(uris);
+            //}
             MessageHeader header = new MessageHeader();
             header.Protocol = (int)Protocols.ChannelStreaming;
             header.MessageType = 1;
-            //header.MessageId = EtpHelper.NextMessageId;
-            //header.MessageFlags = 3;
-            //header.CorrelationId = 10;
-
-            //var channelDescribe = new ChannelDescribe()
-            //{
-            //    Uris = uris
-            //};
-
+            header.MessageId = EtpHelper.NextMessageId;
+            header.MessageFlags = 3;
+            header.CorrelationId = 10;
+            var channelDescribe = new ChannelDescribe()
+            {
+                Uris = uris
+            };
             string message = $"\nRequest: [Protocol {header.Protocol} MessageType {header.MessageType}]";
-
             Message?.Invoke(message, 0, TraceLevel.Info);
-
             m_client.Handler<IChannelStreamingConsumer>().ChannelDescribe(uris);
         }
+
+        //public void Describe(List<string> uris)
+        //{
+        //    MessageHeader header = new MessageHeader();
+        //    header.Protocol = (int)Protocols.ChannelStreaming;
+        //    header.MessageType = 1;
+        //    //header.MessageId = EtpHelper.NextMessageId;
+        //    //header.MessageFlags = 3;
+        //    //header.CorrelationId = 10;
+
+        //    //var channelDescribe = new ChannelDescribe()
+        //    //{
+        //    //    Uris = uris
+        //    //};
+
+        //    string message = $"\nRequest: [Protocol {header.Protocol} MessageType {header.MessageType}]";
+
+        //    Message?.Invoke(message, 0, TraceLevel.Info);
+
+        //    m_client.Handler<IChannelStreamingConsumer>().ChannelDescribe(uris);
+
+        //}
 
 
     }

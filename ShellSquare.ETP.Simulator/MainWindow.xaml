@@ -50,6 +50,16 @@
             <Button Style="{StaticResource defaultStyle}" Margin="10,0,0,0" Content="Load" x:Name="LoadButton"
                     Click="LoadButton_Click"
                     VerticalAlignment="Center" HorizontalAlignment="Center" Width="80"  />
+            
+            <Button Style="{StaticResource defaultStyle}" Margin="10,0,0,0" Content="Set Up" x:Name="SetUpButton"
+                    Click="SetUpButton_Click"
+                    VerticalAlignment="Center" HorizontalAlignment="Center" Width="80"  />
+
+
+            <!--<Button Style="{StaticResource defaultStyle}" Margin="10,0,0,0" Content="Describe" x:Name="Describe"
+                    Click="Describe_Click"
+                    VerticalAlignment="Center" HorizontalAlignment="Center" Width="80"  />-->
+
             <Button Style="{StaticResource defaultStyle}" Margin="10,0,0,0" Content="Simulate" x:Name="SimulateButton"
                     Click="SimulateButton_Click"
                     VerticalAlignment="Center" HorizontalAlignment="Center" Width="80"  />
